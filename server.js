@@ -287,4 +287,12 @@ app.listen(PORT, () => {
   console.log(`FinPredict running at http://localhost:${PORT}`);
   console.log('FMP API:', process.env.FMP_API_KEY ? '✓' : '✗ missing');
   console.log('Google AI:', process.env.GOOGLE_AI_KEY !== 'your_google_ai_studio_key_here' ? '✓' : '✗ not set');
+
+  // Auto-refresh on startup if no scores exist yet (e.g. fresh Render deploy)
+  const companies = db.getCompanies('candidate');
+  const hasScores = companies.some(c => db.getLatestScore(c.ticker));
+  if (!hasScores && companies.length > 0) {
+    console.log('No scores found — triggering background refresh...');
+    scoreAll(false).catch(err => console.error('Startup refresh failed:', err.message));
+  }
 });

@@ -324,7 +324,7 @@ function getPortfolioPositions(portfolioId) {
     FROM portfolio_positions pp
     LEFT JOIN companies c ON pp.ticker = c.ticker
     LEFT JOIN (
-      SELECT ticker, price FROM daily_metrics
+      SELECT ticker, price, market_cap FROM daily_metrics
       WHERE (ticker, date) IN (
         SELECT ticker, MAX(date) FROM daily_metrics GROUP BY ticker
       )

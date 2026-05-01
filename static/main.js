@@ -31,10 +31,25 @@ const QUAL_REASONING_MAP = {
 };
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+let _pollTimer = null;
+
 document.addEventListener('DOMContentLoaded', () => {
   loadCandidates();
   loadHistorical();
 });
+
+function startPolling() {
+  if (_pollTimer) return;
+  _pollTimer = setInterval(async () => {
+    const res = await fetch('/api/companies').then(r => r.json()).catch(() => []);
+    const hasScores = res.some(c => c.current_score);
+    if (hasScores) {
+      clearInterval(_pollTimer);
+      _pollTimer = null;
+      loadCandidates();
+    }
+  }, 5000);
+}
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function showTab(name, el) {
@@ -62,8 +77,9 @@ async function loadCandidates() {
 
 function renderCandidates(companies) {
   const grid = document.getElementById('company-grid');
-  if (!companies.length) {
-    grid.innerHTML = '<div class="loading">No companies. Run <code>npm run seed</code> first.</div>';
+  if (!companies.length || !companies.some(c => c.current_score)) {
+    grid.innerHTML = '<div class="loading"><div class="spinner"></div> Fetching live data — this takes about a minute on first load...</div>';
+    startPolling();
     return;
   }
   grid.innerHTML = companies.map(c => {

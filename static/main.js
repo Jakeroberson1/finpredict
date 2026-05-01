@@ -339,6 +339,8 @@ async function loadPortfolio() {
     if (!portfolios.length) return;
     currentPortfolioId = portfolios[0].id;
     refreshPortfolioView();
+    // Refresh prices in background so portfolio values stay current
+    fetch('/api/refresh-prices', { method: 'POST' }).catch(() => {});
   } catch (e) {
     console.error('Portfolio load failed:', e);
   }
@@ -352,9 +354,79 @@ async function refreshPortfolioView() {
     renderPortfolioSummary(data.summary, data.portfolio);
     renderHoldings(data.positions);
     renderAllocationChart(data.positions);
+    runPortfolioProjection();
   } catch (e) {
     console.error('Portfolio refresh failed:', e);
   }
+}
+
+let portProjChart = null;
+let portProjTimeout = null;
+
+function runPortfolioProjection() {
+  clearTimeout(portProjTimeout);
+  portProjTimeout = setTimeout(_runPortfolioProjection, 300);
+}
+
+async function _runPortfolioProjection() {
+  if (!currentPortfolioId) return;
+  const years = document.getElementById('port-proj-years')?.value || 5;
+  try {
+    const res = await fetch(`/api/portfolio/${currentPortfolioId}/projection?years=${years}`);
+    const data = await res.json();
+    if (data.error) {
+      document.getElementById('port-proj-placeholder').textContent = data.error;
+      document.getElementById('port-proj-output').style.display = 'none';
+      document.getElementById('port-proj-placeholder').style.display = 'block';
+      return;
+    }
+    renderPortfolioProjection(data);
+  } catch (e) {
+    console.error('Portfolio projection failed:', e);
+  }
+}
+
+function renderPortfolioProjection(data) {
+  document.getElementById('port-proj-output').style.display = 'block';
+  document.getElementById('port-proj-placeholder').style.display = 'none';
+
+  // Chart
+  if (portProjChart) { portProjChart.destroy(); portProjChart = null; }
+  const el = document.getElementById('port-proj-chart');
+  portProjChart = new Chart(el, {
+    type: 'line',
+    data: {
+      labels: data.labels,
+      datasets: [
+        { label: 'Bull', data: data.bull, borderColor: '#1a6b4a', backgroundColor: 'rgba(26,107,74,0.08)', borderWidth: 2, pointRadius: 3, fill: false, tension: 0.3 },
+        { label: 'Base', data: data.base, borderColor: '#3b7fc4', backgroundColor: 'rgba(59,127,196,0.08)', borderWidth: 2.5, pointRadius: 3, fill: false, tension: 0.3 },
+        { label: 'Bear', data: data.bear, borderColor: '#c0392b', backgroundColor: 'rgba(192,57,43,0.08)', borderWidth: 2, pointRadius: 3, fill: false, tension: 0.3 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', labels: { font: { size: 12 } } } },
+      scales: {
+        y: { ticks: { callback: v => '$' + (v >= 1000 ? (v/1000).toFixed(0)+'k' : v) }, grid: { color: '#f0f0f0' } },
+        x: { grid: { display: false } }
+      }
+    }
+  });
+
+  // Summary cards
+  const start = data.currentValue;
+  const cards = [
+    { label: 'Bull Case', val: data.bull[data.bull.length-1], ret: data.summary.bull, color: 'var(--strong)' },
+    { label: 'Base Case', val: data.base[data.base.length-1], ret: data.summary.base, color: 'var(--speculative)' },
+    { label: 'Bear Case', val: data.bear[data.bear.length-1], ret: data.summary.bear, color: 'var(--weak)' },
+  ];
+  document.getElementById('port-proj-summary').innerHTML = cards.map(c => `
+    <div style="background:#f8f9fa;border-radius:8px;padding:14px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${c.label}</div>
+      <div style="font-size:20px;font-weight:700;color:${c.color};margin:4px 0">${fmtDollar(c.val)}</div>
+      <div style="font-size:12px;color:${c.color}">${c.ret > 0 ? '+' : ''}${c.ret}% return</div>
+    </div>
+  `).join('');
 }
 
 function renderPortfolioSummary(s, portfolio) {

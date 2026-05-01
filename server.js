@@ -295,6 +295,104 @@ app.delete('/api/portfolio/:id/positions/:ticker', (req, res) => {
   res.json({ success: true });
 });
 
+// ── Portfolio projection ───────────────────────────────────────────────────────
+
+app.get('/api/portfolio/:id/projection', (req, res) => {
+  const id = parseInt(req.params.id);
+  const years = Math.min(Math.max(parseInt(req.query.years) || 5, 1), 15);
+
+  const portfolio = db.getPortfolios().find(p => p.id === id);
+  if (!portfolio) return res.status(404).json({ error: 'Portfolio not found' });
+
+  const positions = db.getPortfolioPositions(id);
+  if (!positions.length) return res.status(422).json({ error: 'No positions in portfolio' });
+
+  const totalCost = positions.reduce((s, p) => s + p.shares * p.avg_cost_per_share, 0);
+  const cash = portfolio.starting_cash - totalCost;
+
+  // Build per-position projections using same model as /api/project/:ticker
+  const projections = [];
+  for (const pos of positions) {
+    const metrics = db.getLatestMetrics(pos.ticker)[0];
+    if (!metrics) continue;
+
+    const price = pos.current_price || pos.avg_cost_per_share;
+    const revenue = metrics.revenue_ttm;
+    const growthRate = metrics.revenue_growth_yoy ?? 0.15;
+    const marketCap = metrics.market_cap;
+    const psRatio = metrics.ps_ratio ?? (marketCap && revenue ? marketCap / revenue : 15);
+    const shares = metrics.shares_outstanding ?? (marketCap && price ? marketCap / price : null);
+
+    if (!price || !revenue || !shares) continue;
+
+    const currentValue = pos.shares * price;
+    const posProj = { bear: [currentValue], base: [currentValue], bull: [currentValue] };
+    let revBear = revenue, revBase = revenue, revBull = revenue;
+
+    for (let y = 1; y <= years; y++) {
+      const rBear = Math.max(growthRate * Math.pow(0.88, y - 1), 0.02);
+      const rBase = Math.max(growthRate * Math.pow(0.92, y - 1), 0.04);
+      const rBull = Math.max(growthRate * Math.pow(0.95, y - 1), 0.06);
+      revBear *= (1 + rBear); revBase *= (1 + rBase); revBull *= (1 + rBull);
+      const psBear = (psRatio || 15) * Math.pow(0.85, y);
+      const psBase = (psRatio || 15) * Math.pow(0.92, y);
+      const psBull = (psRatio || 15) * Math.pow(0.97, y);
+      const pricePerShare = (rev, ps) => rev * ps / shares;
+      posProj.bear.push(pos.shares * pricePerShare(revBear, psBear));
+      posProj.base.push(pos.shares * pricePerShare(revBase, psBase));
+      posProj.bull.push(pos.shares * pricePerShare(revBull, psBull));
+    }
+    projections.push(posProj);
+  }
+
+  if (!projections.length) return res.status(422).json({ error: 'No projectable positions — refresh data first' });
+
+  // Aggregate: sum positions + cash (cash stays flat)
+  const labels = ['Today', ...Array.from({ length: years }, (_, i) => `Year ${i + 1}`)];
+  const agg = (scenario) => labels.map((_, i) =>
+    +(projections.reduce((s, p) => s + p[scenario][i], 0) + cash).toFixed(2)
+  );
+
+  const bear = agg('bear'), base = agg('base'), bull = agg('bull');
+  const startVal = base[0];
+
+  res.json({
+    labels, bear, base, bull,
+    currentValue: +startVal.toFixed(2),
+    cash: +cash.toFixed(2),
+    years,
+    summary: {
+      bear: ((bear[years] - startVal) / startVal * 100).toFixed(1),
+      base: ((base[years] - startVal) / startVal * 100).toFixed(1),
+      bull: ((bull[years] - startVal) / startVal * 100).toFixed(1),
+    },
+  });
+});
+
+// ── Refresh prices only (lightweight, no scoring) ────────────────────────────
+
+app.post('/api/refresh-prices', async (req, res) => {
+  res.json({ success: true, message: 'Price refresh started' });
+  const { default: YF } = require('yahoo-finance2');
+  const yf = new YF({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+  const companies = db.getCompanies('candidate');
+  const today = new Date().toISOString().slice(0, 10);
+  for (const c of companies) {
+    try {
+      const q = await yf.quote(c.ticker);
+      if (q?.regularMarketPrice) {
+        const existing = db.getLatestMetrics(c.ticker)[0] || {};
+        db.upsertDailyMetrics(c.ticker, today, {
+          ...existing,
+          price: q.regularMarketPrice,
+          market_cap: q.marketCap ?? existing.market_cap,
+        });
+      }
+    } catch (_) {}
+    await new Promise(r => setTimeout(r, 200));
+  }
+});
+
 // ── SPA fallback ──────────────────────────────────────────────────────────────
 
 app.get('*', (req, res) => {

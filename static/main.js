@@ -653,9 +653,9 @@ async function refreshAll() {
   const btn = document.querySelector('.btn-primary[onclick="refreshAll()"]');
   if (btn) { btn.disabled = true; btn.textContent = '↻ Refreshing...'; }
   try {
-    await fetch('/api/refresh-all', { method: 'POST' });
-    showToast('Refresh started — data updates in ~60 seconds');
-    setTimeout(loadCandidates, 65000);
+    await fetch('/api/refresh-all?gemma=true', { method: 'POST' });
+    showToast('Full refresh started (AI scoring included) — data updates in ~2 minutes');
+    setTimeout(loadCandidates, 120000);
   } catch (e) {
     showToast('Refresh failed: ' + e.message);
   } finally {

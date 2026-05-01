@@ -151,7 +151,7 @@ async function scoreTicker(ticker, useGemma = true) {
   });
 
   // Save price history
-  const priceHistory = raw.priceHistory || [];
+  const priceHistory = fmp.extractPriceHistory ? fmp.extractPriceHistory(raw) : (raw.priceHistory || []);
   if (priceHistory.length > 0) {
     const insertPrice = db.db.prepare(
       'INSERT OR IGNORE INTO price_history (ticker, date, price) VALUES (?, ?, ?)'

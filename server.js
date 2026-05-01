@@ -373,23 +373,23 @@ app.get('/api/portfolio/:id/projection', (req, res) => {
 
 app.post('/api/refresh-prices', async (req, res) => {
   res.json({ success: true, message: 'Price refresh started' });
-  const { default: YF } = require('yahoo-finance2');
-  const yf = new YF({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
   const companies = db.getCompanies('candidate');
   const today = new Date().toISOString().slice(0, 10);
   for (const c of companies) {
     try {
-      const q = await yf.quote(c.ticker);
-      if (q?.regularMarketPrice) {
+      const raw = await fmp.fetchAllMetrics(c.ticker);
+      const price = fmp.extractPrice(raw);
+      const marketCap = fmp.extractMarketCap(raw);
+      if (price) {
         const existing = db.getLatestMetrics(c.ticker)[0] || {};
         db.upsertDailyMetrics(c.ticker, today, {
           ...existing,
-          price: q.regularMarketPrice,
-          market_cap: q.marketCap ?? existing.market_cap,
+          price,
+          market_cap: marketCap ?? existing.market_cap,
         });
       }
     } catch (_) {}
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 300));
   }
 });
 

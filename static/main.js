@@ -448,7 +448,9 @@ async function removePosition(ticker) {
 // ── Growth Projector ──────────────────────────────────────────────────────────
 async function loadProjectorTickers() {
   const sel = document.getElementById('projector-ticker');
-  if (sel.options.length > 1) return; // already loaded
+  const current = sel.value;
+  // Clear and reload every time so newly added stocks appear
+  while (sel.options.length > 1) sel.remove(1);
   try {
     const res = await fetch('/api/companies');
     const companies = await res.json();
@@ -458,6 +460,7 @@ async function loadProjectorTickers() {
       opt.textContent = `${c.ticker} — ${c.name}`;
       sel.appendChild(opt);
     });
+    if (current) sel.value = current;
   } catch {}
 }
 

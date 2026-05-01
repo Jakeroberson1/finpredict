@@ -248,6 +248,26 @@ app.post('/api/portfolio/:id/positions', async (req, res) => {
   if (!ticker || !dollars) return res.status(400).json({ error: 'ticker and dollars required' });
 
   const sym = ticker.toUpperCase();
+
+  // Auto-add the company if not already tracked
+  if (!db.getCompany(sym)) {
+    try {
+      const profile = await fmp.getProfile(sym);
+      if (!profile || !profile.symbol) return res.status(404).json({ error: `Ticker ${sym} not found` });
+      db.upsertCompany({
+        ticker: profile.symbol,
+        name: profile.companyName || sym,
+        category: 'candidate',
+        sector: profile.sector || 'Unknown',
+        seed_tier: null, seed_score: null,
+        synopsis: `${profile.companyName || sym} added via portfolio.`,
+      });
+      scoreTicker(profile.symbol, false).catch(() => {});
+    } catch (e) {
+      return res.status(422).json({ error: `Could not find ticker ${sym}` });
+    }
+  }
+
   // Get current price
   const metrics = db.getLatestMetrics(sym)[0];
   let price = metrics?.price;
